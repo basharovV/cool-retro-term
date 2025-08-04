@@ -20,7 +20,9 @@
 import QtQuick 2.2
 import QtQuick.Window 2.1
 import QtQuick.Controls 2.3
-
+import QtGraphicalEffects 1.12
+import QtQuick.Layouts 1.3
+import "."
 import "menus"
 
 ApplicationWindow {
@@ -29,14 +31,30 @@ ApplicationWindow {
     width: 1024
     height: 768
 
+    color: "transparent"
+
+    flags: Qt.FramelessWindowHint
+
+    Rectangle {
+        id: rect
+        radius: 10
+        anchors.fill: parent
+        anchors.margins: 1
+    }
+
     // Save window properties automatically
-    onXChanged: appSettings.x = x
+    onXChanged:  {
+        appSettings.x = x
+        console.log("Saved x:", appSettings.x)
+    }
     onYChanged: appSettings.y = y
     onWidthChanged: appSettings.width = width
     onHeightChanged: appSettings.height = height
 
     // Load saved window geometry and show the window
     Component.onCompleted: {
+        console.log("Restoring geometry:", appSettings.x, appSettings.y, appSettings.width, appSettings.height)
+
         x = appSettings.x
         y = appSettings.y
         width = appSettings.width
@@ -68,8 +86,6 @@ ApplicationWindow {
     }
 
     property string wintitle: appSettings.wintitle
-
-    color: "#00000000"
 
     title: terminalContainer.title || qsTr(appSettings.wintitle)
 
@@ -144,6 +160,11 @@ ApplicationWindow {
         id: terminalContainer
         width: parent.width
         height: (parent.height + Math.abs(y))
+
+        layer.enabled: true
+        layer.effect: OpacityMask {
+            maskSource: rect
+        }
     }
     SettingsWindow {
         id: settingswindow
@@ -161,10 +182,20 @@ ApplicationWindow {
             terminalSize: terminalContainer.terminalSize
         }
     }
+    FramelessHelper {
+        id: framelessHelper
+        anchors.fill: parent
+        window: terminalWindow
+        resizeMargin: 8
+        enableDrag: true
+        enableResize: true
+    }
     onClosing: {
+        console.log("Window closing, appSettings:", appSettings.x, appSettings.y)
+
         // OSX Since we are currently supporting only one window
         // quit the application when it is closed.
         if (appSettings.isMacOS)
-            Qt.quit()
+           Qt.quit()
     }
 }

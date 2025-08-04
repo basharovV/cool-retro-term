@@ -8,7 +8,14 @@
 #include <QIcon>
 #include <QQuickStyle>
 
+#include <QWindow>
+#include <QPainterPath>
+#include <QRegion>
+#include <QObject>
 #include <QDebug>
+#include <QScreen>
+#include <QRect>
+
 #include <stdlib.h>
 
 #include <QFontDatabase>
@@ -16,6 +23,44 @@
 
 #include <fileio.h>
 #include <monospacefontmanager.h>
+#include <QFile>
+#include <QTextStream>
+#include <QDateTime>
+#include <csignal>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QDir>
+
+QFile *logFile = nullptr;
+
+void logMessage(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+    if (!logFile || !logFile->isOpen()) return;
+
+    QTextStream out(logFile);
+    out << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " ";
+
+    switch (type) {
+        case QtDebugMsg: out << "[DEBUG] "; break;
+        case QtInfoMsg: out << "[INFO] "; break;
+        case QtWarningMsg: out << "[WARNING] "; break;
+        case QtCriticalMsg: out << "[CRITICAL] "; break;
+        case QtFatalMsg: out << "[FATAL] "; break;
+    }
+
+    out << msg << Qt::endl;
+    out.flush();
+    if (type == QtFatalMsg) abort();
+}
+
+void handleSignal(int signal) {
+    if (logFile && logFile->isOpen()) {
+        QTextStream out(logFile);
+        out << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz")
+            << " Caught signal: " << signal << Qt::endl;
+        out.flush();
+    }
+    exit(signal);
+}
 
 QString getNamedArgument(QStringList args, QString name, QString defaultName)
 {
@@ -38,14 +83,14 @@ int main(int argc, char *argv[])
     // Disable Connections slot warnings
     QLoggingCategory::setFilterRules("qt.qml.connections.warning=false");
 
-#if defined (Q_OS_LINUX)
-    setenv("QSG_RENDER_LOOP", "threaded", 0);
-#endif
+    #if defined (Q_OS_LINUX)
+        setenv("QSG_RENDER_LOOP", "threaded", 0);
+    #endif
 
-#if defined(Q_OS_MAC)
-    // This allows UTF-8 characters usage in OSX.
-    setenv("LC_CTYPE", "UTF-8", 1);
-#endif
+    #if defined(Q_OS_MAC)
+        // This allows UTF-8 characters usage in OSX.
+        setenv("LC_CTYPE", "UTF-8", 1);
+    #endif
 
     if (argc>1 && (!strcmp(argv[1],"-h") || !strcmp(argv[1],"--help"))) {
         QTextStream cout(stdout, QIODevice::WriteOnly);
@@ -72,15 +117,32 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setAttribute(Qt::AA_MacDontSwapCtrlAndMeta, true);
 
+    // Add logs
+    // Redirect logs to file
+    QString logPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/log.txt";
+    QDir().mkpath(QFileInfo(logPath).path()); // Ensure directory exists
+    logFile = new QFile(logPath);
+    if (logFile->open(QIODevice::Append | QIODevice::Text)) {
+        freopen(logPath.toUtf8().constData(), "a", stderr);
+        qInstallMessageHandler(logMessage);
+        qDebug() << "Logging started. Log file at:" << logPath;
+    }
+
+    // Catch termination signals
+    std::signal(SIGSEGV, handleSignal);
+    std::signal(SIGABRT, handleSignal);
+    std::signal(SIGFPE, handleSignal);
+    std::signal(SIGILL, handleSignal);
+    std::signal(SIGTERM, handleSignal);
     QQmlApplicationEngine engine;
     FileIO fileIO;
     MonospaceFontManager monospaceFontManager;
 
-#if !defined(Q_OS_MAC)
-    app.setWindowIcon(QIcon::fromTheme("cool-retro-term", QIcon(":../icons/32x32/cool-retro-term.png")));
-#else
-    app.setWindowIcon(QIcon(":../icons/32x32/cool-retro-term.png"));
-#endif
+    #if !defined(Q_OS_MAC)
+        app.setWindowIcon(QIcon::fromTheme("cool-retro-term", QIcon(":../icons/32x32/cool-retro-term.png")));
+    #else
+        app.setWindowIcon(QIcon(":../icons/32x32/cool-retro-term.png"));
+    #endif
 
     app.setOrganizationName("cool-retro-term");
     app.setOrganizationDomain("cool-retro-term");
@@ -117,6 +179,25 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty()) {
         qDebug() << "Cannot load QML interface";
         return EXIT_FAILURE;
+    }
+
+    // Get the root window object
+    QWindow *window = qobject_cast<QWindow *>(engine.rootObjects().first());
+    if (window) {
+        // Set the window to be borderless / frameless
+        window->setFlags(Qt::FramelessWindowHint | Qt::Window);
+        // Optionally, set other flags such as stay on top:
+        // window->setFlags(window->flags() | Qt::WindowStaysOnTopHint);
+        int padding = 8;
+        // Get the screen geometry
+        QScreen *screen = window->screen();
+        QRect screenGeometry = screen->geometry();
+        // Calculate the window position
+        int x = screenGeometry.width() - 400 - padding;
+        int y = screenGeometry.height() - 320 - padding;
+        // Set the window geometry
+        window->setGeometry(x, y, 400, 320);
+        QPainterPath path;
     }
 
     // Quit the application when the engine closes.
